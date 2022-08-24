@@ -720,7 +720,7 @@ class SMBConnection:
 				header.Command  = SMB2Command.SESSION_SETUP
 				header.CreditReq = 0
 				
-				msg = SMBMessage(header, command)
+				msg = SMB2Message(header, command)
 				message_id = await self.sendSMB(msg)
 				#self.update_integrity(sent_msg.to_bytes())
 				rply, rply_data = await self.recvSMB(message_id, ret_data=True)
@@ -971,7 +971,7 @@ class SMBConnection:
 			header = SMB2Header_SYNC()
 			header.Command  = SMB2Command.TREE_CONNECT
 			
-			msg = SMBMessage(header, command)
+			msg = SMB2Message(header, command)
 			message_id = await self.sendSMB(msg)
 			
 			rply = await self.recvSMB(message_id)
@@ -1019,7 +1019,7 @@ class SMBConnection:
 			header.Command  = SMB2Command.CREATE
 			header.TreeId = tree_id
 			
-			msg = SMBMessage(header, command)
+			msg = SMB2Message(header, command)
 			message_id = await self.sendSMB(msg)
 			
 			rply = await self.recvSMB(message_id)
@@ -1082,7 +1082,7 @@ class SMBConnection:
 			command.MinimumCount = 0
 			command.RemainingBytes = 0
 			
-			msg = SMBMessage(header, command)
+			msg = SMB2Message(header, command)
 			message_id = await self.sendSMB(msg)
 			
 			rply = await self.recvSMB(message_id)
@@ -1135,7 +1135,7 @@ class SMBConnection:
 			command.FileId = file_id
 			command.Data = data
 			
-			msg = SMBMessage(header, command)
+			msg = SMB2Message(header, command)
 			message_id = await self.sendSMB(msg)
 			
 			rply = await self.recvSMB(message_id)
@@ -1177,7 +1177,7 @@ class SMBConnection:
 			header.Command  = SMB2Command.QUERY_INFO
 			header.TreeId = tree_id
 			
-			msg = SMBMessage(header, command)
+			msg = SMB2Message(header, command)
 			message_id = await self.sendSMB(msg)
 
 			rply = await self.recvSMB(message_id)

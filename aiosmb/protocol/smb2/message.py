@@ -1,6 +1,7 @@
 import enum
 import io
 
+from aiosmb.commons.utils.align import align
 from aiosmb.wintypes.ntstatus import NTStatus
 from aiosmb.protocol.smb2.headers import *
 from aiosmb.protocol.smb2.commands import *
@@ -66,6 +67,29 @@ class SMB2Message:
 	def __init__(self,header = None,command = None ):
 		self.header    = header
 		self.command   = command
+		self.next_message = None
+		self.padder = None
+
+	def chain_message(self, message, related=False):
+		'''Chain another message to this message. Returns the chained message so that more messages can be tacked onto it.'''
+		# clear any previous chained message
+		if self.next_message is not None:
+			self.header.NextCommand = 0
+			self.next_message = None
+
+		# next command location: after current command, padded to multiple of 8
+		end = self.header.StructureSize + self.command.StructureSize
+		if self.header.NextCommand == 0:
+			self.header.NextCommand = align(end, 8)
+		assert self.header.NextCommand >= end
+
+		# set RELATED_OPERATIONS flag, if requested
+		if related:
+			self.header.Flags |= SMB2HeaderFlag.SMB2_FLAGS_RELATED_OPERATIONS
+
+		# remember the next message for later
+		self.next_message = message
+		return message
 
 	@staticmethod
 	def from_bytes(bbuff):
@@ -73,6 +97,8 @@ class SMB2Message:
 
 	@staticmethod
 	def from_buffer(buff):
+		pos = buff.tell()
+
 		msg = SMB2Message()
 		if SMB2Message.isAsync(buff):
 			msg.header = SMB2Header_ASYNC.from_buffer(buff)
@@ -104,6 +130,12 @@ class SMB2Message:
 			#print('Could not find command implementation! %s' % str(e))
 			msg.command = SMB2NotImplementedCommand.from_buffer(buff)
 
+		# if chained, parse the next command
+		if msg.header.NextCommand != 0:
+			buff.seek(pos + msg.header.NextCommand, io.SEEK_SET)
+			next_msg = SMB2Message.from_buffer(buff)
+			msg.chain_message(next_msg)
+
 		return msg
 
 	@staticmethod
@@ -120,14 +152,34 @@ class SMB2Message:
 	def to_bytes(self):
 		t  = self.header.to_bytes()
 		t += self.command.to_bytes()
-		return t
+
+		# if not compound, we're done
+		if self.next_message is None:
+			return t
+
+		# compound message: pad first
+		padlen = self.header.NextCommand - len(t)
+		if not callable(self.padder) or (pad := self.padder(self, padlen)) is None:
+			pad = b'\x00' * padlen
+		t += pad
+
+		# then append the next message
+		return t + self.next_message.to_bytes()
 
 	def __repr__(self):
-		t = "== SMBv2 Message =="
+		t = "== SMBv2 Message ==\r\n"
 		t += repr(self.header)
 		t += repr(self.command)
+
+		next_msg = self.next_message
+		while next_msg is not None:
+			t += '\r\n== (chained) ==\r\n'
+			t += repr(next_msg.header)
+			t += repr(next_msg.command)
+			next_msg = next_msg.next_message
+
 		return t
-		
+
 
 command2object = {
 	'NEGOTIATE_REQ'       : NEGOTIATE_REQ,

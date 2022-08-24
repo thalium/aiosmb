@@ -44,6 +44,14 @@ class SMB2Header_SYNC():
 		return hdr
 
 	def to_bytes(self):
+		# set defaults if still unset
+		if self.CreditCharge is None:
+			self.CreditCharge = 0
+		if self.CreditReq is None:
+			self.CreditReq = 0
+		if self.MessageId is None:
+			self.MessageId = 0
+
 		t  = self.ProtocolId
 		t += self.StructureSize.to_bytes(2, byteorder = 'little', signed=False)
 		t += self.CreditCharge.to_bytes(2, byteorder = 'little', signed=False)
