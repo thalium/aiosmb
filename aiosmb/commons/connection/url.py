@@ -48,12 +48,12 @@ class SMBConnectionURL:
 		if self.connection_url is not None:
 			self.parse()
 
-	def get_connection(self):
+	def get_connection(self, nosign=False):
 		credential = self.get_credential()
 		target = self.get_target()
 		spneg = AuthenticatorBuilder.to_spnego_cred(credential, target)
 		
-		return SMBConnection(spneg, target)
+		return SMBConnection(spneg, target, nosign=nosign)
 
 	def create_connection_newtarget(self, ip_or_hostname):
 		credential = self.get_credential()
