@@ -1,3 +1,4 @@
+import copy
 import enum
 import io
 
@@ -64,10 +65,10 @@ class SMB2Transform:
 		return t
 
 class SMB2Message:
-	def __init__(self,header = None,command = None ):
-		self.header    = header
-		self.command   = command
-		self.next_message = None
+	def __init__(self, header=None, command=None, next_message=None):
+		self.header = header
+		self.command = command
+		self.next_message = next_message
 		self.padder = None
 
 	def chain_message(self, message, related=False):
@@ -77,11 +78,10 @@ class SMB2Message:
 			self.header.NextCommand = 0
 			self.next_message = None
 
-		# next command location: after current command, padded to multiple of 8
-		end = self.header.StructureSize + self.command.StructureSize
+		# only update NextCommand if unset, since chain_message is also called when parsing compound replies
 		if self.header.NextCommand == 0:
-			self.header.NextCommand = align(end, 8)
-		assert self.header.NextCommand >= end
+			# next command location: after current command, padded to multiple of 8
+			self.header.NextCommand = align(self.size(), 8)
 
 		# set RELATED_OPERATIONS flag, if requested
 		if related:
@@ -165,6 +165,13 @@ class SMB2Message:
 
 		# then append the next message
 		return t + self.next_message.to_bytes()
+
+	def size(self):
+		# since there's no available way to just compute the size of the header/command, we serialize ourselves and get the length
+	    # but since serialization may alter the header/command, we operate on copies (shallow ones should be enough)
+		# so this method is probably a lot more costly than it should be, meh
+		clone = SMB2Message(copy.copy(self.header), copy.copy(self.command), self.next_message)
+		return len(clone.to_bytes())
 
 	def __repr__(self):
 		t = "== SMBv2 Message ==\r\n"
