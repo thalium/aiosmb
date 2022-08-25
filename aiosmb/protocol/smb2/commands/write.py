@@ -16,7 +16,7 @@ class WRITE_REQ:
 		self.StructureSize = 49
 		self.DataOffset = None
 		self.Length = None
-		self.Offset = None
+		self.Offset = 0
 		self.FileId = None
 		self.Channel = Channel.SMB2_CHANNEL_NONE
 		self.RemainingBytes = 0
@@ -31,13 +31,14 @@ class WRITE_REQ:
 		self.Data = None
 
 	def to_bytes(self):
-		self.DataOffset = 64 + 2+2+4+8+16+4+4+2+2+4
+		if self.DataOffset is None:
+			self.DataOffset = 64 + 2+2+4+8+16+4+4+2+2+4
 		if self.Data:
 			self.Length = len(self.Data)
 			self.Buffer = self.Data
 		else:
-			self.Length = 0 
-			self.Buffer = b''
+			self.Length = self.Length or 0
+			self.Buffer = self.Buffer or b''
 			
 		if self.WriteChannelInfo:
 			self.Buffer += self.WriteChannelInfo.to_bytes()
