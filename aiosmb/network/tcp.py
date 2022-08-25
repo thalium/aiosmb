@@ -3,6 +3,7 @@ import asyncio
 
 from aiosmb import logger
 from aiosmb.commons.exceptions import *
+from aiosmb.commons.utils.queue import CtxQueue
 
 class TCPSocket:
 	"""
@@ -15,7 +16,7 @@ class TCPSocket:
 		self.reader = None
 		self.writer = None
 		
-		self.out_queue = asyncio.Queue()
+		self.out_queue = CtxQueue()
 		self.in_queue = asyncio.Queue()
 		
 		self.disconnected = asyncio.Event()
@@ -86,9 +87,9 @@ class TCPSocket:
 		"""
 		try:
 			while not self.disconnected.is_set():
-				data = await self.out_queue.get()
-				self.writer.write(data)
-				await self.writer.drain()
+				async with self.out_queue as data:
+					self.writer.write(data)
+					await self.writer.drain()
 		except asyncio.CancelledError:
 			#the SMB connection is terminating
 			return

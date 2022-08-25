@@ -1,10 +1,15 @@
-from aiosmb.network.tcp import TCPSocket
 import asyncio
+from dataclasses import dataclass
 import io
 
 from aiosmb import logger
+from aiosmb.network.tcp import TCPSocket
 from aiosmb.protocol.smb.message import *
 from aiosmb.protocol.smb2.message import *
+from aiosmb.commons.utils.queue import CtxQueue
+
+def netbios_prefix(length):
+	return b'\x00' + length.to_bytes(3, byteorder='big', signed=False)
 
 class NetBIOSTransport:
 	"""
@@ -17,7 +22,7 @@ class NetBIOSTransport:
 		self.socket_in_queue = network_transport.in_queue
 		
 		self.in_queue = asyncio.Queue()
-		self.out_queue = asyncio.Queue()
+		self.out_queue = CtxQueue()
 		
 		self.outgoing_task = None
 		self.incoming_task = None
@@ -126,13 +131,11 @@ class NetBIOSTransport:
 		"""
 		try:
 			while True:
-				smb_msg_data = await self.out_queue.get()
-				if smb_msg_data is None:
-					return
-				data  = b'\x00'
-				data += len(smb_msg_data).to_bytes(3, byteorder='big', signed = False)
-				data += smb_msg_data
-				await self.socket_out_queue.put(data)
+				async with self.out_queue as smb_msg_data:
+					if smb_msg_data is None:
+						return
+					data = netbios_prefix(len(smb_msg_data)) + smb_msg_data
+					await self.socket_out_queue.put(data)
 		
 		except asyncio.CancelledError:
 			#the SMB connection is terminating
@@ -146,3 +149,81 @@ class NetBIOSTransport:
 			await self.stop()
 			self.out_task_finished.set()
 			
+	def queue_outgoing(self, msg):
+		self.out_queue.put_nowait(msg.to_bytes())
+
+# dummy object to queue when stalling is required
+@dataclass
+class StallMarker:
+	rank: int
+
+class StallingNetBIOSTransport(NetBIOSTransport):
+	'''NetBIOS transport that can send a NetBIOS prefix, stall, leaving the server waiting, then send the message data later.'''
+	def __init__(self, network_transport):
+		super().__init__(network_transport)
+		self.auto_stall = 0  # number of subsequent messages to stall
+		self.stalled = 0     # number of currently stalled messages
+		self.unstalled_queue = CtxQueue()  # queue of completed stalls
+		self.resume_cond = asyncio.Condition()  # synchronization primitive for the stall/unstall dance
+
+	async def handle_outgoing(self):
+		try:
+			async with self.resume_cond:  # hold the lock when not stalling
+				while True:
+					async with self.out_queue as data:
+						if data is None:
+							return
+						if isinstance(data, StallMarker):
+							# found a stall marker, let's stall
+							await self.resume_cond.wait()
+							self.stalled -= 1
+							self.unstalled_queue.put_nowait(data)  # give it back
+							continue
+						await self.socket_out_queue.put(data)
+
+		except asyncio.CancelledError:
+			#the SMB connection is terminating
+			return
+
+		except Exception as e:
+			logger.exception('StallingNetBIOSTransport handle_outgoing')
+			await self.stop()
+
+		finally:
+			await self.stop()
+			self.out_task_finished.set()
+
+	def queue_outgoing(self, msg):
+		# queue the prefix & the message
+		data = msg.to_bytes()
+		self.queue_outgoing_prefix(len(data), stall=self.auto_stall > 0)
+		self.queue_outgoing_data(data)
+		if self.auto_stall > 0:
+			self.auto_stall -= 1
+
+	def queue_outgoing_prefix(self, len, stall=True):
+		self.out_queue.put_nowait(netbios_prefix(len))
+		if stall:
+			self.stalled += 1
+			self.out_queue.put_nowait(StallMarker(self.stalled))
+
+	def queue_outgoing_data(self, data):
+		self.out_queue.put_nowait(data)
+
+	async def unstall_outgoing(self, count=1):
+		for _ in range(count):
+			async with self.resume_cond:
+				self.resume_cond.notify()
+			async with self.unstalled_queue:
+				# nothing to do with the marker *shrug*
+				pass
+
+	async def drain_outgoing(self):
+		if self.stalled:
+			# the outgoing task will stall at some point, wait for this to happen, then drain the socket queue
+			async with self.resume_cond:
+				await self.socket_out_queue.join()
+		else:
+			# the outgoing task won't stall, drain its queue, then drain the socket queue
+			await self.out_queue.join()
+			await self.socket_out_queue.join()

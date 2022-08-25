@@ -159,6 +159,7 @@ class SMBConnection:
 		self.settings = None
 		self.network_transport = None 
 		self.netbios_transport = None #this class is used by the netbios transport class, keeping it here also maybe you like to go in raw
+		self.netbios_transport_factory = NetBIOSTransport # set before connecting to use a custom NetBIOS transport
 		self.incoming_task = None
 		self.keepalive_task = None
 		self.keepalive_timeout = 15
@@ -332,7 +333,7 @@ class SMBConnection:
 					msg = SMBMessage.from_bytes(msg_data)
 					
 
-				logger.log(1, '__handle_smb_in got new message with Id %s' % msg.header.MessageId)
+				logger.log(1, '__handle_smb_in got new message with Id %s, Command %s' % (msg.header.MessageId, msg.header.Command))
 				#print(msg)
 				
 				if isinstance(msg, SMB2Transform):
@@ -455,7 +456,7 @@ class SMBConnection:
 				raise err
 			
 			
-			self.netbios_transport = NetBIOSTransport(self.network_transport)
+			self.netbios_transport = self.netbios_transport_factory(self.network_transport)
 			_, err = await self.netbios_transport.run()
 			if err is not None:
 				raise err
@@ -897,7 +898,7 @@ class SMBConnection:
 			if isinstance(msg, SMBMessage):
 				#creating an event for outstanding response
 				#self.OutstandingResponsesEvent[0] = asyncio.Event()
-				#await self.netbios_transport.out_queue.put(msg.to_bytes())
+				#self.netbios_transport.queue_outgoing(msg)
 				#self.SequenceWindow += 1
 				#return 0
 				message_id = 0
@@ -911,7 +912,7 @@ class SMBConnection:
 				self.update_integrity(msg.to_bytes())
 
 			self.OutstandingResponsesEvent[message_id] = asyncio.Event()
-			await self.netbios_transport.out_queue.put(msg.to_bytes())
+			self.netbios_transport.queue_outgoing(msg)
 			if ret_message is True:
 				return message_id, msg
 			return message_id
@@ -950,7 +951,7 @@ class SMBConnection:
 
 		#creating an event for outstanding response
 		self.OutstandingResponsesEvent[message_id] = asyncio.Event()
-		await self.netbios_transport.out_queue.put(msg.to_bytes())
+		self.netbios_transport.queue_outgoing(msg)
 		
 		if ret_message is True:
 			return message_id, msg
