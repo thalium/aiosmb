@@ -1068,7 +1068,7 @@ class SMBConnection:
 			header.Command  = SMB2Command.READ
 			header.TreeId = tree_id
 			
-			if length < self.MaxReadSize:
+			if length > self.MaxReadSize:
 				length = self.MaxReadSize
 			
 			if self.selected_dialect != NegotiateDialects.SMB202 and self.SupportsMultiCredit == True:
